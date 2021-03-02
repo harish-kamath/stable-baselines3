@@ -11,6 +11,7 @@ import numpy as np
 import pandas
 import torch as th
 from matplotlib import pyplot as plt
+import wandb
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -604,6 +605,7 @@ class Logger(object):
         """
         if self.level == DISABLED:
             return
+        wandb.log(dict(self.name_to_value))
         for _format in self.output_formats:
             if isinstance(_format, KVWriter):
                 _format.write(self.name_to_value, self.name_to_excluded, step)

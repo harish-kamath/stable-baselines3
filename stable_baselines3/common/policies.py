@@ -374,6 +374,7 @@ class ActorCriticPolicy(BasePolicy):
         sde_net_arch: Optional[List[int]] = None,
         use_expln: bool = False,
         squash_output: bool = False,
+        privileged_critic: bool = False,
         features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
         features_extractor_kwargs: Optional[Dict[str, Any]] = None,
         normalize_images: bool = True,
@@ -407,6 +408,7 @@ class ActorCriticPolicy(BasePolicy):
         self.net_arch = net_arch
         self.activation_fn = activation_fn
         self.ortho_init = ortho_init
+        self.privileged_critic = privileged_critic
 
         self.features_extractor = features_extractor_class(self.observation_space, **self.features_extractor_kwargs)
         self.features_dim = self.features_extractor.features_dim
@@ -476,7 +478,11 @@ class ActorCriticPolicy(BasePolicy):
         #       net_arch here is an empty list and mlp_extractor does not
         #       really contain any layers (acts like an identity module).
         self.mlp_extractor = MlpExtractor(
-            self.features_dim, net_arch=self.net_arch, activation_fn=self.activation_fn, device=self.device
+            self.features_dim,
+            net_arch=self.net_arch,
+            activation_fn=self.activation_fn,
+            mask_policy= self.observation_space.num_params if self.privileged_critic else 0,
+            device=self.device
         )
 
     def _build(self, lr_schedule: Schedule) -> None:

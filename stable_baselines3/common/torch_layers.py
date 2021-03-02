@@ -160,6 +160,7 @@ class MlpExtractor(nn.Module):
         feature_dim: int,
         net_arch: List[Union[int, Dict[str, List[int]]]],
         activation_fn: Type[nn.Module],
+        mask_policy: int = 0,
         device: Union[th.device, str] = "auto",
     ):
         super(MlpExtractor, self).__init__()
@@ -208,6 +209,11 @@ class MlpExtractor(nn.Module):
         # Save dim, used to create the distributions
         self.latent_dim_pi = last_layer_dim_pi
         self.latent_dim_vf = last_layer_dim_vf
+        
+        policy_mask = [True] * feature_dim
+        for i in range(1,mask_policy+1):
+            policy_mask[-i] = False
+        self.policy_mask = th.Tensor(policy_mask).to(device)
 
         # Create networks
         # If the list of layers is empty, the network will just act as an Identity module
@@ -220,8 +226,8 @@ class MlpExtractor(nn.Module):
         :return: latent_policy, latent_value of the specified network.
             If all layers are shared, then ``latent_policy == latent_value``
         """
-        shared_latent = self.shared_net(features)
-        return self.policy_net(shared_latent), self.value_net(shared_latent)
+        policy_masked = features * self.policy_mask.to(features.device)
+        return self.policy_net(self.shared_net(policy_masked)), self.value_net(self.shared_net(features))
 
 
 def get_actor_critic_arch(net_arch: Union[List[int], Dict[str, List[int]]]) -> Tuple[List[int], List[int]]:
