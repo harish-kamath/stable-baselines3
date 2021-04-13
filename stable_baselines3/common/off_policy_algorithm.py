@@ -261,6 +261,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         )
 
         callback.on_training_start(locals(), globals())
+        last_tested = 0
 
         while self.num_timesteps < total_timesteps:
             rollout = self.collect_rollouts(
@@ -272,19 +273,27 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 replay_buffer=self.replay_buffer,
                 log_interval=log_interval,
             )
+            for e in self.env.envs:
+                e.env.train_return = rollout.episode_reward
 
             if rollout.continue_training is False:
                 break
-
             if self.num_timesteps > 0 and self.num_timesteps > self.learning_starts:
                 # If no `gradient_steps` is specified,
                 # do as many gradients steps as steps performed during the rollout
+                last_tested += 1
                 gradient_steps = self.gradient_steps if self.gradient_steps > 0 else rollout.episode_timesteps
                 self.train(batch_size=self.batch_size, gradient_steps=gradient_steps)
+                if last_tested > 5:
+                    last_tested = 0
+                    test_return = self.test(num_episodes=3)
+                    logger.record("rollout/test_rew_mean", test_return)
 
         callback.on_training_end()
 
         return self
+    
+
 
     def train(self, gradient_steps: int, batch_size: int) -> None:
         """
@@ -292,6 +301,56 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         (gradient descent and update target networks)
         """
         raise NotImplementedError()
+
+    def test(self, num_episodes: int) -> float:
+        episode_rewards, total_timesteps = [], []
+        num_collected_steps, num_collected_episodes = 0, 0
+
+        current_modes = []
+        for e in self.env.envs:
+            assert(hasattr(e,"mode"))
+            current_modes.append(e.mode)
+            e.mode = "test"
+
+        action_noise = self.action_noise
+        if self.use_sde:
+            self.actor.reset_noise()
+
+        while num_collected_episodes < num_episodes:
+            done = False
+            episode_reward, episode_timesteps = 0.0, 0
+
+            while not done:
+
+                if self.use_sde and self.sde_sample_freq > 0 and num_collected_steps % self.sde_sample_freq == 0:
+                    # Sample a new noise matrix
+                    self.actor.reset_noise()
+
+                # Select action randomly or according to policy
+                action, buffer_action = self._sample_action(0, action_noise)
+
+                # Rescale and perform action
+                new_obs, reward, done, infos = self.env.step(action)
+
+                episode_timesteps += 1
+                num_collected_steps += 1
+                episode_reward += reward
+            
+            if done:
+                num_collected_episodes += 1
+                episode_rewards.append(episode_reward)
+                total_timesteps.append(episode_timesteps)
+                self.env.reset()
+
+                if action_noise is not None:
+                    action_noise.reset()
+
+        mean_reward = np.mean(episode_rewards) if num_collected_episodes > 0 else 0.0
+        for i,e in enumerate(self.env.envs):
+            e.mode = current_modes[i]
+        return mean_reward
+
+
 
     def _sample_action(
         self, learning_starts: int, action_noise: Optional[ActionNoise] = None
@@ -346,6 +405,10 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
             logger.record("rollout/ep_rew_mean", safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]))
             logger.record("rollout/ep_len_mean", safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]))
+            try:
+                logger.record("rollout/num_generated_envs", safe_mean([e.num_generated_envs for e in self.env.envs]))
+            except:
+                logger.record("rollout/num_generated_envs",0)
         logger.record("time/fps", fps)
         logger.record("time/time_elapsed", int(time.time() - self.start_time), exclude="tensorboard")
         logger.record("time/total timesteps", self.num_timesteps, exclude="tensorboard")

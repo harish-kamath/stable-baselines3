@@ -39,6 +39,7 @@ class Actor(BasePolicy):
         features_extractor: nn.Module,
         features_dim: int,
         activation_fn: Type[nn.Module] = nn.ReLU,
+        mask_policy: int = 0,
         normalize_images: bool = True,
     ):
         super(Actor, self).__init__(
@@ -58,6 +59,11 @@ class Actor(BasePolicy):
         # Deterministic action
         self.mu = nn.Sequential(*actor_net)
 
+        policy_mask = [True] * features_dim
+        for i in range(1,mask_policy+1):
+            policy_mask[-i] = False
+        self.policy_mask = th.Tensor(policy_mask)
+
     def _get_constructor_parameters(self) -> Dict[str, Any]:
         data = super()._get_constructor_parameters()
 
@@ -73,8 +79,10 @@ class Actor(BasePolicy):
 
     def forward(self, obs: th.Tensor) -> th.Tensor:
         # assert deterministic, 'The TD3 actor only outputs deterministic actions'
+
         features = self.extract_features(obs)
-        return self.mu(features)
+        policy_masked = features * self.policy_mask.to(features.device)
+        return self.mu(policy_masked)
 
     def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
         # Note: the deterministic deterministic parameter is ignored in the case of TD3.
@@ -117,6 +125,8 @@ class TD3Policy(BasePolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        privileged_critic: bool = False,
+        film_critic: bool = False,
         n_critics: int = 2,
         share_features_extractor: bool = True,
     ):
@@ -155,8 +165,17 @@ class TD3Policy(BasePolicy):
                 "n_critics": n_critics,
                 "net_arch": critic_arch,
                 "share_features_extractor": share_features_extractor,
+                "film_critic": film_critic,
+                "num_env_params": self.observation_space.num_params
             }
         )
+
+        if privileged_critic:
+            self.actor_kwargs.update(
+                {
+                    "mask_policy": self.observation_space.num_params
+                }
+            )
 
         self.actor, self.actor_target = None, None
         self.critic, self.critic_target = None, None

@@ -742,6 +742,8 @@ class ContinuousCritic(BaseModel):
         activation_fn: Type[nn.Module] = nn.ReLU,
         normalize_images: bool = True,
         n_critics: int = 2,
+        film_critic: bool = False,
+        num_env_params: int = 0,
         share_features_extractor: bool = True,
     ):
         super().__init__(
@@ -756,6 +758,7 @@ class ContinuousCritic(BaseModel):
         self.share_features_extractor = share_features_extractor
         self.n_critics = n_critics
         self.q_networks = []
+        self.film = film_critic
         for idx in range(n_critics):
             q_net = create_mlp(features_dim + action_dim, 1, net_arch, activation_fn)
             q_net = nn.Sequential(*q_net)

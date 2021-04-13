@@ -81,6 +81,7 @@ class TD3(OffPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        value_tau: float = None,
     ):
 
         super(TD3, self).__init__(
@@ -110,6 +111,9 @@ class TD3(OffPolicyAlgorithm):
         self.policy_delay = policy_delay
         self.target_noise_clip = target_noise_clip
         self.target_policy_noise = target_policy_noise
+
+        self.value_tau = tau if value_tau is None else value_tau
+        
 
         if _init_setup_model:
             self._setup_model()
@@ -171,13 +175,15 @@ class TD3(OffPolicyAlgorithm):
                 actor_loss.backward()
                 self.actor.optimizer.step()
 
-                polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.tau)
+                polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.value_tau)
                 polyak_update(self.actor.parameters(), self.actor_target.parameters(), self.tau)
 
         logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
         if len(actor_losses) > 0:
             logger.record("train/actor_loss", np.mean(actor_losses))
         logger.record("train/critic_loss", np.mean(critic_losses))
+        logger.record("train/critic_value", th.mean(th.stack(current_q_values)).item())
+        logger.record("train/target_critic_value", th.mean(target_q_values).item())
 
     def learn(
         self,
