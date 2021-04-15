@@ -311,26 +311,16 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             assert(hasattr(e,"mode"))
             current_modes.append(e.mode)
             e.mode = "test"
-
-        action_noise = self.action_noise
-        if self.use_sde:
-            self.actor.reset_noise()
+        
+        obs = self.env.reset()
 
         while num_collected_episodes < num_episodes:
             done = False
             episode_reward, episode_timesteps = 0.0, 0
 
             while not done:
-
-                if self.use_sde and self.sde_sample_freq > 0 and num_collected_steps % self.sde_sample_freq == 0:
-                    # Sample a new noise matrix
-                    self.actor.reset_noise()
-
-                # Select action randomly or according to policy
-                action, buffer_action = self._sample_action(0, action_noise)
-
-                # Rescale and perform action
-                new_obs, reward, done, infos = self.env.step(action)
+                action, _states = self.predict(obs)
+                obs, reward, done, infos = self.env.step(action)
 
                 episode_timesteps += 1
                 num_collected_steps += 1
@@ -340,10 +330,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 num_collected_episodes += 1
                 episode_rewards.append(episode_reward)
                 total_timesteps.append(episode_timesteps)
-                self.env.reset()
-
-                if action_noise is not None:
-                    action_noise.reset()
+                obs = self.env.reset()
 
         mean_reward = np.mean(episode_rewards) if num_collected_episodes > 0 else 0.0
         for i,e in enumerate(self.env.envs):
